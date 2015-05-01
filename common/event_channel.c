@@ -28,6 +28,8 @@
 #include <xen/keyhandler.h>
 #include <xen/event_fifo.h>
 #include <asm/current.h>
+#include <xen/trace.h>
+#include <xen/types.h>
 
 #include <public/xen.h>
 #include <public/event_channel.h>
@@ -605,6 +607,8 @@ int evtchn_send(struct domain *d, unsigned int lport)
     struct domain *ld = d, *rd;
     struct vcpu   *rvcpu;
     int            rport, ret = 0;
+    uint64_t time;
+    uint32_t d1, d2;
 
     spin_lock(&ld->event_lock);
 
@@ -634,10 +638,23 @@ int evtchn_send(struct domain *d, unsigned int lport)
         rport = lchn->u.interdomain.remote_port;
         rchn  = evtchn_from_port(rd, rport);
         rvcpu = rd->vcpu[rchn->notify_vcpu_id];
-        if ( consumer_is_xen(rchn) )
+        if ( consumer_is_xen(rchn) ) {
             (*xen_notification_fn(rchn))(rvcpu, rport);
-        else
+        } else {
+	    // xballoon
+	    /******************begin********************/
+            //atomic_set(&rvcpu->is_event_interdomain, 1);
+	    //atomic_inc(&rvcpu->is_event_interdomain);
+	    time = NOW();
+	    d2 = (unsigned)(time & 0xffffffffLL);
+	    d1 = (unsigned)(time >> 32);
+	    //TRACE_5D(TRC_SCHED_KUN_INTERDOMAIN, rvcpu->domain->domain_id, 
+	    //		    rvcpu->vcpu_id, atomic_read(&rvcpu->is_event_interdomain), d1, d2);
+	    TRACE_4D(TRC_SCHED_KUN_INTERDOMAIN, rvcpu->domain->domain_id,
+	            rvcpu->vcpu_id, d1, d2);
+	    /*******************end*********************/
             evtchn_set_pending(rvcpu, rport);
+        }
         break;
     case ECS_IPI:
         evtchn_set_pending(ld->vcpu[lchn->notify_vcpu_id], lport);
