@@ -515,7 +515,7 @@ csched_alloc_pdata(const struct scheduler *ops, int cpu)
     prv->credit += prv->credits_per_tslice;
     prv->ncpus++;
     cpumask_set_cpu(cpu, prv->cpus);
-    if ( prv->ncpus == 22 )
+    if ( prv->ncpus == 1 )
     {
         prv->master = cpu;
         init_timer(&prv->master_ticker, csched_acct, prv, cpu);

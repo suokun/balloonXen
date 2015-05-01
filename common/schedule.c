@@ -59,6 +59,9 @@ static void s_timer_fn(void *unused);
 static void vcpu_periodic_timer_fn(void *data);
 static void vcpu_singleshot_timer_fn(void *data);
 static void poll_timer_fn(void *data);
+/***********************[xballoon begin]*************************************/
+static void balloon_timer_fn(void *data);
+/***********************[end]***************************************/
 
 /* This is global for now so that private implementations can reach it */
 DEFINE_PER_CPU(struct schedule_data, schedule_data);
@@ -209,6 +212,13 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     init_timer(&v->poll_timer, poll_timer_fn,
                v, v->processor);
 
+/***********************[xballoon begin]*************************************/
+    init_timer(&v->balloon_timer, balloon_timer_fn,
+               v, v->processor);
+    atomic_set(&v->sleep_count, 0);
+    atomic_set(&v->is_event_interdomain, 0);
+/***********************[end]***************************************/
+
     /* Idle VCPUs are scheduled immediately. */
     if ( is_idle_domain(d) )
     {
@@ -333,6 +343,10 @@ void sched_destroy_vcpu(struct vcpu *v)
     kill_timer(&v->periodic_timer);
     kill_timer(&v->singleshot_timer);
     kill_timer(&v->poll_timer);
+/***********************[xballoon begin]*************************************/
+    kill_timer(&v->balloon_timer);
+/***********************[end]***************************************/
+
     if ( test_and_clear_bool(v->is_urgent) )
         atomic_dec(&per_cpu(schedule_data, v->processor).urgent_count);
     SCHED_OP(VCPU2OP(v), remove_vcpu, v);
@@ -356,6 +370,22 @@ void vcpu_sleep_nosync(struct vcpu *v)
     unsigned long flags;
     spinlock_t *lock = vcpu_schedule_lock_irqsave(v, &flags);
 
+
+    //add by Kun
+    uint64_t time;
+    uint32_t d1, d2, d3, d4, t1, t2;
+    d1 = v->runstate.time[0] & 0xffffffffLL;
+    d2 = v->runstate.time[1] & 0xffffffffLL;
+    d3 = v->runstate.time[2] & 0xffffffffLL;
+    d4 = v->runstate.time[3] & 0xffffffffLL;
+
+    time = NOW();
+    t2 = (unsigned)(time & 0xffffffffLL);
+    t1 = (unsigned)(time >> 32);
+    TRACE_4D(TRC_SCHED_KUN_11, v->domain->domain_id, v->vcpu_id, t1, t2);
+    TRACE_6D(TRC_SCHED_KUN_1, v->domain->domain_id, v->runstate.state, d1, d2, d3, d4);
+    //end
+
     if ( likely(!vcpu_runnable(v)) )
     {
         if ( v->runstate.state == RUNSTATE_runnable )
@@ -363,6 +393,19 @@ void vcpu_sleep_nosync(struct vcpu *v)
 
         SCHED_OP(VCPU2OP(v), sleep, v);
     }
+
+    //add by Kun
+    d1 = v->runstate.time[0] & 0xffffffffLL;
+    d2 = v->runstate.time[1] & 0xffffffffLL;
+    d3 = v->runstate.time[2] & 0xffffffffLL;
+    d4 = v->runstate.time[3] & 0xffffffffLL;
+
+    time = NOW();
+    t2 = (unsigned)(time & 0xffffffffLL);
+    t1 = (unsigned)(time >> 32);
+    TRACE_4D(TRC_SCHED_KUN_12, v->domain->domain_id, v->vcpu_id, t1, t2);
+    TRACE_6D(TRC_SCHED_KUN_2, v->domain->domain_id, v->runstate.state, d1, d2, d3, d4);
+    //end
 
     vcpu_schedule_unlock_irqrestore(lock, flags, v);
 
@@ -384,6 +427,25 @@ void vcpu_wake(struct vcpu *v)
     unsigned long flags;
     spinlock_t *lock = vcpu_schedule_lock_irqsave(v, &flags);
 
+    //add by Kun
+    uint64_t time;
+    uint32_t t1, t2;
+    uint32_t d1, d2, d3, d4;
+    d1 = v->runstate.time[0] & 0xffffffffLL;
+    d2 = v->runstate.time[1] & 0xffffffffLL;
+    d3 = v->runstate.time[2] & 0xffffffffLL;
+    d4 = v->runstate.time[3] & 0xffffffffLL;
+
+    if(v->domain->domain_id == 1) {
+	time = NOW();
+        t2 = (unsigned)(time & 0xffffffffLL);
+	t1 = (unsigned)(time >> 32);
+
+    	TRACE_4D(TRC_SCHED_KUN_33, v->domain->domain_id, v->vcpu_id, t1, t2); 
+    	TRACE_6D(TRC_SCHED_KUN_3, 111, v->runstate.state, d1, d2, d3, d4);
+    }	
+    //end
+
     if ( likely(vcpu_runnable(v)) )
     {
         if ( v->runstate.state >= RUNSTATE_blocked )
@@ -396,6 +458,22 @@ void vcpu_wake(struct vcpu *v)
             vcpu_runstate_change(v, RUNSTATE_offline, NOW());
     }
 
+    //add by Kun
+    d1 = v->runstate.time[0] & 0xffffffffLL;
+    d2 = v->runstate.time[1] & 0xffffffffLL;
+    d3 = v->runstate.time[2] & 0xffffffffLL;
+    d4 = v->runstate.time[3] & 0xffffffffLL;
+    
+    if(v->domain->domain_id == 1) {
+	time = NOW();
+        t2 = (unsigned)(time & 0xffffffffLL);
+	t1 = (unsigned)(time >> 32);
+
+    	TRACE_4D(TRC_SCHED_KUN_33, v->domain->domain_id, v->vcpu_id, t1, t2); 
+    	TRACE_6D(TRC_SCHED_KUN_4, 222, v->runstate.state, d1, d2, d3, d4);
+    }
+    //end
+
     vcpu_schedule_unlock_irqrestore(lock, flags, v);
 
     TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
@@ -403,8 +481,41 @@ void vcpu_wake(struct vcpu *v)
 
 void vcpu_unblock(struct vcpu *v)
 {
-    if ( !test_and_clear_bit(_VPF_blocked, &v->pause_flags) )
+    uint64_t time;
+    uint32_t d1, d2;
+
+//xballoon
+/***********************[xballoon begin]*************************************/
+    TRACE_6D(TRC_SCHED_KUN_UNBLOCK, 111, v->domain->domain_id,
+		    v->vcpu_id, atomic_read(&v->is_event_interdomain), atomic_read(&v->sleep_count), v->pause_flags);
+    if (atomic_dec_and_test(&v->is_event_interdomain)) {
+	//if(v->is_event_interdomain > 1UL){
+	//    atomic_set(&v->is_event_interdomain, 0);    
+	//}
+
+        stop_timer(&v->balloon_timer);
+        if ( atomic_read(&v->sleep_count) ) {
+            SCHED_OP(VCPU2OP(v), unpause, v);
+            return;
+        }
+    }
+
+    //if is_event_interdomain is not 0, set it as 0
+    if(atomic_read(&v->is_event_interdomain)){
+	atomic_set(&v->is_event_interdomain, 0);
+    }
+
+    TRACE_6D(TRC_SCHED_KUN_UNBLOCK, 222, v->domain->domain_id,
+		    v->vcpu_id, atomic_read(&v->is_event_interdomain), atomic_read(&v->sleep_count), v->pause_flags);
+/***********************[end]***************************************/
+    if ( !test_and_clear_bit(_VPF_blocked, &v->pause_flags) ) {
+        time = NOW();
+	d2 = (unsigned)(time & 0xffffffffLL);
+	d1 = (unsigned)(time >> 32);
+
+	TRACE_5D(TRC_SCHED_KUN_9, v->domain->domain_id, v->vcpu_id, v->pause_flags, d1, d2);
         return;
+    }
 
     /* Polling period ends when a VCPU is unblocked. */
     if ( unlikely(v->poll_evtchn != 0) )
@@ -428,6 +539,8 @@ static void vcpu_migrate(struct vcpu *v)
     unsigned int old_cpu, new_cpu;
     spinlock_t *old_lock, *new_lock;
     bool_t pick_called = 0;
+
+    TRACE_2D(TRC_SCHED_VCPU_MIGRATE, v->domain->domain_id, v->vcpu_id);
 
     old_cpu = new_cpu = v->processor;
     for ( ; ; )
@@ -707,6 +820,7 @@ void vcpu_block(void)
 {
     struct vcpu *v = current;
 
+    TRACE_4D(TRC_SCHED_KUN_10, v->domain->domain_id, v->vcpu_id, 22222, 22222);
     set_bit(_VPF_blocked, &v->pause_flags);
 
     /* Check for events /after/ blocking: avoids wakeup waiting race. */
@@ -727,6 +841,44 @@ static void vcpu_block_enable_events(void)
     vcpu_block();
 }
 
+/***********************[xballoon begin]*************************************/
+static void do_sleep(struct sched_sleep sleep)
+{
+    struct vcpu *v = current;
+    //add by Kun
+    uint32_t d1, d2;
+    uint64_t time;
+    //end
+
+    if ( sleep.timeout <= 0 ) {
+        time = NOW();
+	d2 = (unsigned) (time & 0xffffffffLL);
+	d1 = (unsigned) (time >> 32);
+	TRACE_4D(TRC_SCHED_STOP_TIMER, v->domain->domain_id, v->vcpu_id, d1, d2);
+
+        stop_timer(&v->balloon_timer);
+    } else {
+	time = NOW();
+	d2 = (unsigned) (time & 0xffffffffLL);
+	d1 = (unsigned) (time >> 32);
+	TRACE_5D(TRC_SCHED_DO_SLEEP, v->domain->domain_id, v->vcpu_id, d1, d2, sleep.timeout);
+
+	//if ( sleep.timeout != 0 ) {
+	    //stop_timer(&v->balloon_timer); 
+        //    set_timer(&v->balloon_timer, NOW() + sleep.timeout);
+	//}
+
+	vcpu_info(v, evtchn_upcall_mask) = 1;
+        SCHED_OP(VCPU2OP(v), pause, v);
+	vcpu_info(v, evtchn_upcall_mask) = 0;
+        if ( sleep.timeout != 0 ) {
+	//    stop_timer(&v->balloon_timer); 
+            set_timer(&v->balloon_timer, NOW() + sleep.timeout);
+	}
+    }
+}
+/***********************[end]***************************************/
+
 static long do_poll(struct sched_poll *sched_poll)
 {
     struct vcpu   *v = current;
@@ -742,6 +894,7 @@ static long do_poll(struct sched_poll *sched_poll)
     if ( !guest_handle_okay(sched_poll->ports, sched_poll->nr_ports) )
         return -EFAULT;
 
+    TRACE_4D(TRC_SCHED_KUN_10, v->domain->domain_id, v->vcpu_id, 11111, 11111);
     set_bit(_VPF_blocked, &v->pause_flags);
     v->poll_evtchn = -1;
     set_bit(v->vcpu_id, d->poll_mask);
@@ -991,6 +1144,19 @@ ret_t do_sched_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
         break;
     }
 
+/***********************[xballoon begin]*************************************/    
+    case SCHEDOP_sleep:
+    {
+        struct sched_sleep sched_sleep;
+        
+        if ( copy_from_guest(&sched_sleep, arg, 1) )
+            break;
+
+        do_sleep(sched_sleep);
+        break;
+    }
+/***********************[end]***************************************/
+
     case SCHEDOP_remote_shutdown:
     {
         struct domain *d;
@@ -1171,6 +1337,11 @@ static void schedule(void)
     struct task_slice     next_slice;
     int cpu = smp_processor_id();
 
+    //add by Kun
+    uint64_t time;
+    uint32_t d1, d2;
+    //end
+
     ASSERT_NOT_IN_ATOMIC();
 
     SCHED_STAT_CRANK(sched_run);
@@ -1241,6 +1412,18 @@ static void schedule(void)
     ASSERT(next->runstate.state != RUNSTATE_running);
     vcpu_runstate_change(next, RUNSTATE_running, now);
 
+
+    //add by Kun
+    time = NOW();
+    d2 = (unsigned)(time & 0xffffffffLL);
+    d1 = (unsigned)(time >> 32);
+    TRACE_4D(TRC_SCHED_KUN_15, prev->domain->domain_id, next->domain->domain_id, d1, d2);
+
+    TRACE_6D(TRC_SCHED_KUN_14, 
+	     prev->domain->domain_id, prev->vcpu_id, prev->runstate.state,
+             next->domain->domain_id, next->vcpu_id, next->runstate.state);
+    //end
+
     /*
      * NB. Don't add any trace records from here until the actual context
      * switch, else lost_records resume will not work properly.
@@ -1308,6 +1491,21 @@ static void poll_timer_fn(void *data)
     if ( test_and_clear_bit(v->vcpu_id, v->domain->poll_mask) )
         vcpu_unblock(v);
 }
+
+/***********************[begin]*************************************/
+static void balloon_timer_fn(void *data)
+{
+    struct vcpu *v = data;
+
+    uint64_t time = NOW();
+    uint32_t d1,d2;
+    d2=(unsigned)(time & 0xffffffffLL);
+    d1=(unsigned)(time >> 32);
+    TRACE_4D(TRC_SCHED_KUN_TIMER_FN, v->domain->domain_id, v->vcpu_id, d1, d2);
+
+    SCHED_OP(VCPU2OP(v), unpause, v);
+}
+/***********************[end]***************************************/
 
 static int cpu_schedule_up(unsigned int cpu)
 {
