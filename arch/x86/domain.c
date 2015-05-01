@@ -62,6 +62,8 @@
 #include <xen/iommu.h>
 #include <compat/vcpu.h>
 #include <asm/psr.h>
+#include <xen/trace.h>
+
 
 DEFINE_PER_CPU(struct vcpu *, curr_vcpu);
 DEFINE_PER_CPU(unsigned long, cr4);
@@ -2145,13 +2147,33 @@ void vcpu_mark_events_pending(struct vcpu *v)
     int already_pending = test_and_set_bit(
         0, (unsigned long *)&vcpu_info(v, evtchn_upcall_pending));
 
-    if ( already_pending )
+    int64_t time;
+    int32_t d1, d2;
+    time = NOW();
+    d2 = (unsigned)(time & 0xffffffffLL);
+    d1 = (unsigned)(time >> 32);
+
+    //add by Kun
+    atomic_set(&v->is_event_interdomain, 1);
+    //end
+
+    TRACE_6D(TRC_SCHED_KUN_MARK_PENDING, v->domain->domain_id, v->vcpu_id, 
+		already_pending, atomic_read(&v->is_event_interdomain), d1, d2);
+    TRACE_4D(TRC_SCHED_KUN_13, v->domain->domain_id, v->vcpu_id, 
+		vcpu_info(v, evtchn_upcall_mask), atomic_read(&v->is_event_interdomain));
+    // xBalloon
+    if ( already_pending && !atomic_read(&v->is_event_interdomain))
         return;
 
-    if ( has_hvm_container_vcpu(v) )
+    if ( has_hvm_container_vcpu(v) ) {
         hvm_assert_evtchn_irq(v);
+//    else
+//add by Kun
+    } else if(vcpu_info(v, evtchn_upcall_mask)) {
+	return;
+    } //end 
     else
-        vcpu_kick(v);
+    	vcpu_kick(v);
 }
 
 static void vcpu_kick_softirq(void)
