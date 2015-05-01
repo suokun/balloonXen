@@ -2154,7 +2154,7 @@ void vcpu_mark_events_pending(struct vcpu *v)
     d1 = (unsigned)(time >> 32);
 
     //add by Kun
-    atomic_set(&v->is_event_interdomain, 1);
+    //atomic_set(&v->is_event_interdomain, 1);
     //end
 
     TRACE_6D(TRC_SCHED_KUN_MARK_PENDING, v->domain->domain_id, v->vcpu_id, 

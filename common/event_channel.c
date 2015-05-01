@@ -643,7 +643,7 @@ int evtchn_send(struct domain *d, unsigned int lport)
         } else {
 	    // xballoon
 	    /******************begin********************/
-            //atomic_set(&rvcpu->is_event_interdomain, 1);
+            atomic_set(&rvcpu->is_event_interdomain, 1);
 	    //atomic_inc(&rvcpu->is_event_interdomain);
 	    time = NOW();
 	    d2 = (unsigned)(time & 0xffffffffLL);
