@@ -421,7 +421,9 @@ __runq_tickle(unsigned int cpu, struct csched_vcpu *new)
                 SCHED_VCPU_STAT_CRANK(cur, kicked_away);
                 SCHED_VCPU_STAT_CRANK(cur, migrate_r);
                 SCHED_STAT_CRANK(migrate_kicked_away);
-                set_bit(_VPF_migrating, &cur->vcpu->pause_flags);
+
+		//add by Kun, for case 3
+                //set_bit(_VPF_migrating, &cur->vcpu->pause_flags);
                 cpumask_set_cpu(cpu, &mask);
             }
             else if ( !new_idlers_empty )
@@ -513,7 +515,7 @@ csched_alloc_pdata(const struct scheduler *ops, int cpu)
     prv->credit += prv->credits_per_tslice;
     prv->ncpus++;
     cpumask_set_cpu(cpu, prv->cpus);
-    if ( prv->ncpus == 1 )
+    if ( prv->ncpus == 22 )
     {
         prv->master = cpu;
         init_timer(&prv->master_ticker, csched_acct, prv, cpu);
@@ -948,6 +950,9 @@ csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
 {
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
     const unsigned int cpu = vc->processor;
+    uint64_t time;
+    uint32_t d1, d2;
+
 
     BUG_ON( is_idle_vcpu(vc) );
 
@@ -993,6 +998,11 @@ csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
         svc->pri = CSCHED_PRI_TS_BOOST;
     }
 
+
+    time = NOW();
+    d2 = (unsigned)(time & 0xffffffffLL);
+    d1 = (unsigned)(time >> 32);
+    TRACE_5D(TRC_SCHED_VCPU_WAKE, svc->vcpu->domain->domain_id, svc->vcpu->vcpu_id, svc->pri, d1, d2);
     /* Put the VCPU on the runq and tickle CPUs */
     __runq_insert(cpu, svc);
     __runq_tickle(cpu, svc);
@@ -1208,7 +1218,7 @@ csched_acct(void* dummy)
     int credit_balance;
     int credit_xtra;
     int credit;
-
+    
 
     spin_lock_irqsave(&prv->lock, flags);
 
@@ -1338,10 +1348,11 @@ csched_acct(void* dummy)
                 /* Park running VCPUs of capped-out domains */
                 if ( sdom->cap != 0U &&
                      credit < -credit_cap &&
-                     !test_and_set_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) )
+                     !test_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) )
                 {
                     SCHED_STAT_CRANK(vcpu_park);
                     vcpu_pause_nosync(svc->vcpu);
+                    set_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags); 
                 }
 
                 /* Lower bound on credits */
@@ -1357,7 +1368,10 @@ csched_acct(void* dummy)
                 svc->pri = CSCHED_PRI_TS_UNDER;
 
                 /* Unpark any capped domains whose credits go positive */
-                if ( test_and_clear_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) )
+		/******************xballoon begin********************/
+                if ( !atomic_read(&svc->vcpu->sleep_count) && 
+                     test_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) )
+		/******************xballoon end**********************/
                 {
                     /*
                      * It's important to unset the flag AFTER the unpause()
@@ -1366,16 +1380,17 @@ csched_acct(void* dummy)
                      */
                     SCHED_STAT_CRANK(vcpu_unpark);
                     vcpu_unpause(svc->vcpu);
+		    clear_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags); 
                 }
 
                 /* Upper bound on credits means VCPU stops earning */
                 if ( credit > prv->credits_per_tslice )
                 {
-                    __csched_vcpu_acct_stop_locked(prv, svc);
-                    /* Divide credits in half, so that when it starts
-                     * accounting again, it starts a little bit "ahead" */
-                    credit /= 2;
-                    atomic_set(&svc->credit, credit);
+		//	__csched_vcpu_acct_stop_locked(prv, svc);
+			/* Divide credits in half, so that when it starts
+			 * accounting again, it starts a little bit "ahead" */
+			credit /= 2;
+			atomic_set(&svc->credit, credit);
                 }
             }
 
@@ -1620,6 +1635,11 @@ csched_schedule(
         /* Re-instate a boosted idle VCPU as normal-idle. */
         scurr->pri = CSCHED_PRI_IDLE;
     }
+    /* mod by Jia to start accounting */
+  //  if ( list_empty(&scurr->active_vcpu_elem) )
+  //  {    
+  //      __csched_vcpu_acct_start(prv, scurr);
+  //  }
 
     /* Choices, choices:
      * - If we have a tasklet, we need to run the idle vcpu no matter what.
@@ -1930,6 +1950,73 @@ static void csched_tick_resume(const struct scheduler *ops, unsigned int cpu)
             - now % MICROSECS(prv->tick_period_us) );
 }
 
+//xballoon
+/***********************[begin]*************************************/
+static void csched_pause(const struct scheduler *ops, struct vcpu *v)
+{
+    struct csched_private *prv = CSCHED_PRIV(ops);
+    struct csched_vcpu * const svc = CSCHED_VCPU(v);
+    unsigned long flags;
+    uint64_t time;
+    uint32_t d1, d2;
+
+    spin_lock_irqsave(&prv->lock, flags);
+    if ( !test_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) ) {
+	time = NOW();
+	d2 = (unsigned)(time & 0xffffffffLL);
+	d1 = (unsigned)(time >> 32);
+
+	TRACE_6D(TRC_SCHED_KUN_PAUSE, 111, v->domain->domain_id, v->vcpu_id, atomic_read(&v->sleep_count), d1, d2);
+	//vcpu_info(v, evtchn_upcall_mask) = 1;
+
+	set_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags); 
+        vcpu_pause_nosync(svc->vcpu);
+        //set_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags); 
+        atomic_inc(&v->sleep_count);
+
+	//vcpu_info(v, evtchn_upcall_mask) = 0;
+        time = NOW();
+	d2 = (unsigned)(time & 0xffffffffLL);
+	d1 = (unsigned)(time >> 32);
+	
+	TRACE_6D(TRC_SCHED_KUN_PAUSE, 222, v->domain->domain_id, v->vcpu_id, atomic_read(&v->sleep_count), d1, d2);
+    }
+    spin_unlock_irqrestore(&prv->lock, flags);
+}
+
+static void csched_unpause(const struct scheduler *ops, struct vcpu *v)
+{
+    struct csched_private *prv = CSCHED_PRIV(ops);
+    struct csched_vcpu * const svc = CSCHED_VCPU(v);
+    unsigned long flags;
+    uint64_t time;
+    uint32_t d1, d2;
+
+    time = NOW();
+    d2 = (unsigned)(time & 0xffffffffLL);
+    d1 = (unsigned)(time >> 32);
+    TRACE_6D(TRC_SCHED_KUN_UNPAUSE, 111, v->domain->domain_id, v->vcpu_id, atomic_read(&v->sleep_count), d1, d2);
+
+    spin_lock_irqsave(&prv->lock, flags);
+    if ( test_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) ) {
+        if (atomic_dec_and_test(&v->sleep_count)) {
+            // printk("[%ld]csched_unpause: dom=%d vcpu=%d\n", 
+            //        NOW(), v->domain->domain_id, v->vcpu_id);
+	    clear_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags);
+            vcpu_unpause(svc->vcpu);
+	    //clear_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags);
+        }
+    }
+    spin_unlock_irqrestore(&prv->lock, flags);
+
+
+    time = NOW();
+    d2 = (unsigned)(time & 0xffffffffLL);
+    d1 = (unsigned)(time >> 32);
+    TRACE_6D(TRC_SCHED_KUN_UNPAUSE, 222, v->domain->domain_id, v->vcpu_id, atomic_read(&v->sleep_count), d1, d2);
+}
+/***********************[end]***************************************/
+
 static struct csched_private _csched_priv;
 
 const struct scheduler sched_credit_def = {
@@ -1967,4 +2054,10 @@ const struct scheduler sched_credit_def = {
 
     .tick_suspend   = csched_tick_suspend,
     .tick_resume    = csched_tick_resume,
+
+//xballoon
+/***********************[begin]*************************************/
+    .pause          = csched_pause,
+    .unpause        = csched_unpause,
+/***********************[end]***************************************/
 };
