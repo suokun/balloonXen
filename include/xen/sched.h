@@ -154,7 +154,10 @@ struct vcpu
     struct timer     singleshot_timer;
 
     struct timer     poll_timer;    /* timeout for SCHEDOP_poll */
-
+// xballoon
+/***********************[begin]*************************************/
+    struct timer     balloon_timer; /* for SCHEDOP_sleep */
+/***********************[end]***************************************/
     void            *sched_priv;    /* scheduler-specific data */
 
     struct vcpu_runstate_info runstate;
@@ -200,6 +203,9 @@ struct vcpu
     /* VCPU need affinity restored */
     bool_t           affinity_broken;
 
+/***********************[begin]*************************************/
+    atomic_t           is_event_interdomain;
+/***********************[end]***************************************/
 
     /*
      * > 0: a single port is being polled;
@@ -250,6 +256,10 @@ struct vcpu
     struct evtchn_fifo_vcpu *evtchn_fifo;
 
     struct arch_vcpu arch;
+
+/***********************[begin]*************************************/
+    atomic_t sleep_count;
+/***********************[end]***************************************/
 };
 
 /* Per-domain lock can be recursively acquired in fault handlers. */
