@@ -857,7 +857,7 @@ static void do_sleep(struct sched_sleep sleep)
 	TRACE_4D(TRC_SCHED_STOP_TIMER, v->domain->domain_id, v->vcpu_id, d1, d2);
 
         stop_timer(&v->balloon_timer);
-    } else { */
+    } else {  */
 	time = NOW();
 	d2 = (unsigned) (time & 0xffffffffLL);
 	d1 = (unsigned) (time >> 32);
