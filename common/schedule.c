@@ -850,14 +850,14 @@ static void do_sleep(struct sched_sleep sleep)
     uint64_t time;
     //end
 
-    if ( sleep.timeout <= 0 ) {
+/*    if ( sleep.timeout <= 0 ) {
         time = NOW();
 	d2 = (unsigned) (time & 0xffffffffLL);
 	d1 = (unsigned) (time >> 32);
 	TRACE_4D(TRC_SCHED_STOP_TIMER, v->domain->domain_id, v->vcpu_id, d1, d2);
 
         stop_timer(&v->balloon_timer);
-    } else {
+    } else { */
 	time = NOW();
 	d2 = (unsigned) (time & 0xffffffffLL);
 	d1 = (unsigned) (time >> 32);
@@ -875,7 +875,7 @@ static void do_sleep(struct sched_sleep sleep)
 	//    stop_timer(&v->balloon_timer); 
             set_timer(&v->balloon_timer, NOW() + sleep.timeout);
 	}
-    }
+    //}
 }
 /***********************[end]***************************************/
 
@@ -1148,9 +1148,10 @@ ret_t do_sched_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
     case SCHEDOP_sleep:
     {
         struct sched_sleep sched_sleep;
-        
-        if ( copy_from_guest(&sched_sleep, arg, 1) )
-            break;
+        sched_sleep.timeout = 10000*100;
+
+        //if ( copy_from_guest(&sched_sleep, arg, 1) )
+        //    break;
 
         do_sleep(sched_sleep);
         break;
