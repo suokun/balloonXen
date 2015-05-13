@@ -1148,8 +1148,29 @@ ret_t do_sched_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
     case SCHEDOP_sleep:
     {
         struct sched_sleep sched_sleep;
-        sched_sleep.timeout = 10000*100;
+        //sched_sleep.timeout = 10000*100;
+	//uint64_t delta =  (uint64_t)((current->t2 - current->t1) * 7/8 + (current->t3 - current->t2) * 1/8);
+	struct vcpu* v = current;
+	uint16_t cap = SCHED_OP(VCPU2OP(v), getcap, v);
 
+	uint64_t delta =  (uint64_t)((current->t2 - current->t1) * (100-cap)/100);
+
+
+	//if(delta < 100*10000){
+		TRACE_6D(TRC_SCHED_KUN_16, current->domain->domain_id, current->vcpu_id, 
+				delta, current->t1, current->t2, cap);
+	//	delta = 100 * 10000;
+	//}
+	sched_sleep.timeout = delta;
+	current->t_flag = 0;
+	//current->t1 = current->t2;
+	//current->t2 = current->t3;
+/*	if (delta >= 0) {
+		sched_sleep.timeout = delta;
+	} else {
+		sched_sleep.timeout = 0;
+	}
+*/
         //if ( copy_from_guest(&sched_sleep, arg, 1) )
         //    break;
 

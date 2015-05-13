@@ -652,6 +652,14 @@ int evtchn_send(struct domain *d, unsigned int lport)
 	    //		    rvcpu->vcpu_id, atomic_read(&rvcpu->is_event_interdomain), d1, d2);
 	    TRACE_4D(TRC_SCHED_KUN_INTERDOMAIN, rvcpu->domain->domain_id,
 	            rvcpu->vcpu_id, d1, d2);
+
+	    if(!(rvcpu->t_flag)) {
+	    	rvcpu->t1 = rvcpu->t2;
+	    	//rvcpu->t2 = rvcpu->t3;
+	    }
+	    rvcpu->t_flag = 1;
+	    rvcpu->t2 = time;
+	    //rvcpu->t3 = time;
 	    /*******************end*********************/
             evtchn_set_pending(rvcpu, rport);
         }

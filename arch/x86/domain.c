@@ -433,6 +433,13 @@ int vcpu_initialise(struct vcpu *v)
 
     v->arch.flags = TF_kernel_mode;
 
+    //add by Kun
+    v->t1 = 1000 * 100;
+    v->t2 = 1000 * 200;
+    //v->t3 = 1000 * 300;
+    v->t_flag = 0;
+    //end
+
     /* By default, do not emulate */
     v->arch.mem_event.emulate_flags = 0;
 

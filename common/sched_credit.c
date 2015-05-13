@@ -2015,6 +2015,14 @@ static void csched_unpause(const struct scheduler *ops, struct vcpu *v)
     d1 = (unsigned)(time >> 32);
     TRACE_6D(TRC_SCHED_KUN_UNPAUSE, 222, v->domain->domain_id, v->vcpu_id, atomic_read(&v->sleep_count), d1, d2);
 }
+
+static uint16_t csched_get_dom_cap(const struct scheduler *ops, struct vcpu *vc)
+{
+    struct csched_vcpu * const svc = CSCHED_VCPU(vc);
+    struct csched_dom * const sdom = svc->sdom;
+
+    return sdom->cap;
+}
 /***********************[end]***************************************/
 
 static struct csched_private _csched_priv;
@@ -2059,5 +2067,6 @@ const struct scheduler sched_credit_def = {
 /***********************[begin]*************************************/
     .pause          = csched_pause,
     .unpause        = csched_unpause,
+    .getcap	    = csched_get_dom_cap, 
 /***********************[end]***************************************/
 };

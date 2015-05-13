@@ -169,6 +169,7 @@ struct scheduler {
 /***********************[begin]*************************************/
     void         (*pause)          (const struct scheduler *, struct vcpu *);
     void         (*unpause)        (const struct scheduler *, struct vcpu *);
+    uint16_t     (*getcap)	   (const struct scheduler *, struct vcpu *);
 /***********************[end]***************************************/
 };
 
